@@ -1,0 +1,12 @@
+# raw source data and generated artefacts
+*.csv
+data/
+powerbi/
+output/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.xlsx
+
+# keep the sample report in docs/
+!docs/*.xlsx
