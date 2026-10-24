@@ -22,6 +22,10 @@ to explain the project in an interview. So:
 * Daniel will build the Power BI dashboard himself, with guidance. DAX cannot be run or tested without Power BI
   Desktop, so say clearly when a measure is untested.
 * Keep replies concise. Prose for explanations; a table or list only when comparing options.
+* **Don't work silently through long command chains.** A previous session lost Daniel by running long, unexplained
+  regex and shell one-liners. Put analysis code in a notebook cell or a small named script, say in one sentence what
+  each step checks before running it, and show the result in plain language afterwards. Prefer readable pandas over
+  clever regex; when a regex is unavoidable, explain it.
 
 ## Standing rules (from Daniel)
 
@@ -39,7 +43,7 @@ to explain the project in an interview. So:
 | # | Stage | Status |
 |---|---|---|
 | 1 | Purpose and outputs | **Done except the page list** - see `docs/decisions.md`. Both lenses of competition confirmed; the five proposed dashboard pages are not yet confirmed (settle by stage 7 at the latest) |
-| 2 | Data tour: profile every source against the data dictionary | **In progress** - profiler written; waiting for Daniel's four source files to be profiled |
+| 2 | Data tour: profile every source against the data dictionary | **Done** (2026-10-23) - all four files profiled, notebooks 01-05, checklist answered, complete-files decision made. Summary: `docs/stage2_summary.md` |
 | 3 | Data model: how contracts (old + new) and tenders fit together; measure the tender-to-contract match rate; test for a trend break at the 2023 system change | Not started |
 | 4 | Cleaning rules, one decision at a time | Not started |
 | 5 | Categorisation and supplier resolution | Not started |
@@ -52,27 +56,32 @@ history files only. Phase 2 = page 4 (contract changes, also contract history) a
 only page needing tender files). Stages 3-7 are run for phase 1 first. All four sources are still profiled in
 stage 2, because that tells us early whether page 5 and the tender-to-contract link are realistic.
 
-**Next action:** run `python scripts/profile_sources.py` (Daniel's machine has the files; if they are in
-`data/raw/` you can run it yourself), read the reports in `data/processed/profile/` with Daniel, and work through
-the stage 2 checklist below.
+**Next action:** Daniel commits the stage 2 work. Then start stage 3 by agreeing its question list with Daniel. First
+decision: one award date per contract for the 405 contracts split across the two files.
 
-### Stage 2 checklist (questions the profile must answer)
+### Stage 2 results (detail in `docs/stage2_summary.md`, evidence in `notebooks/01-05`, problems in `docs/project_log.md`)
 
-1. Do the legacy files use the same columns as the current ones? (`schema_comparison.txt`) Which fields are missing
-   before 2023: UNSPSC or GSIN, procurementMethod, limitedTenderingReason, supplier standardized name?
-2. Date coverage and boundaries: do legacy and current contract files meet cleanly around May/Jun 2023, and the
-   tender files around Aug 2022? Any overlap, gap, or placeholder dates?
-3. Row grain: is a contract still one original + amendments in the legacy file? Are there repeated
-   (contractNumber, amendmentNumber) pairs? How common is stray whitespace in identifiers?
-4. How are amendments numbered in legacy rows (alphanumeric values)?
-5. How well populated are `referenceNumber` and `solicitationNumber` in the tender files? (Needed for linking.)
-6. Value fields: are legacy values comparable, and are there negatives, zeros or implausible maxima?
-7. Encoding or malformed rows in any file? Do the "complete" files really make the per-year files unnecessary?
+* Same columns in legacy and current files (91 for contracts, 67 for tenders). The real split is **two record systems
+  by row**, identified by `contractingEntityName`. "Public Works and Government Services Canada" = old system, which
+  has GSIN codes only and no UNSPSC, instrument type, solicitation number or status. "Department of Public Works and
+  Government Services (PSPC)" = new system. The switch was gradual (FY2017-18 to FY2025-26), with no single cutover.
+* Files meet cleanly: contract rows split on 2023-05-31 / 06-01 by the row's award date, or its amendment date when
+  the award date is blank. Tenders split 2022-08-05 / 08-08. As a result, 405 contracts ($6.41B) have rows in both
+  contract files, so stack the files before collapsing to contracts.
+* Combined: 509,389 contract rows, 224,307 contracts. No repeated (contract, amendment) pairs. Legacy has the same
+  trailing-whitespace issue (81 contract-number cells). 27,522 legacy contracts have no `000` row.
+* Placeholder end dates: 8,465 legacy rows and 83 current rows are year 2060 or later. Legacy has 19,352 negative
+  `contractAmount` rows and 251 negative `totalContractValue` rows. Amendment amounts are deltas in 97.1% of
+  old-system and 74.7% of new-system contracts.
+* Tender `referenceNumber` is a notice ID and is useless for linking. Solicitation number with the legacy `/A`
+  suffix stripped is the candidate key, not yet validated.
+* No malformed rows in any file.
 
 ## Data sources (all Open Government Licence - Canada)
 
-Put these in `data/raw/`. The per-fiscal-year files overlap these and should **not** be loaded as well (verify with
-row counts in stage 2).
+Put these in `data/raw/`. **Decision (stage 2): use these four complete files only.** The per-fiscal-year files
+(kept in `data/raw/yearly/`, which the loader never reads) match on 509,388 rows and differ only by a later refresh.
+Files are found by a fragment of their name, so a browser's `...(1).csv` still works.
 
 | Label | File | Covers |
 |---|---|---|
@@ -85,8 +94,7 @@ Base URL for all four: `https://canadabuys.canada.ca/opendata/pub/` + file name.
 between 17 Mar and 10 Apr 2026, so files downloaded earlier may have a different layout. Contract files refresh
 monthly (around the third week), tender files daily. Data dictionary: `docs/data_dictionary.md`.
 
-Only `contracts_current` has been inspected so far (it is what v1 was built on). Nothing is yet known about the
-other three beyond what the dictionary and the dataset pages say.
+All four were profiled on 2026-10-23 (reports in `data/processed/profile/`).
 
 ## What the data cannot do
 
@@ -94,8 +102,9 @@ other three beyond what the dictionary and the dataset pages say.
 * No delivery dates, quantities, unit prices or invoices: no on-time delivery, price variance or PO-to-invoice work.
 * Tender notices carry no dollar value: tender analysis is counts and timing only.
 * This is federal public-sector procurement, not manufacturing or electronics spend. Say so in the README.
-* No explicit tender-to-contract key exists. Linking via `referenceNumber` / `solicitationNumber` is a hypothesis
-  until its match rate is measured.
+* No explicit tender-to-contract key exists. `referenceNumber` matches nothing. Linking via a normalised
+  `solicitationNumber` is a hypothesis until the matches are validated in stage 3.
+* Contracts are PSPC awards only, while tender notices come from many departments.
 
 ## Lessons from the v1 build (contracts_current only, Jun 2023 - Sep 2026)
 
@@ -128,10 +137,16 @@ These are verified facts about that one file; re-check each on the legacy data r
 
 ## Code map and commands
 
-Python 3.13, pandas >= 3.0, openpyxl, pytest. Not a git repository yet (`.gitignore` is ready).
+Python 3.13, pandas >= 3.0, openpyxl, pytest; jupyterlab, matplotlib, pyarrow for the notebooks. Git repository
+on `main`.
 
 ```
 scripts/profile_sources.py   read-only profiler for every CSV in data/raw -> data/processed/profile/*.txt
+spendpipe/sources.py         shared loader for the four sources: trims, NA markers, never loads contact columns,
+                             Parquet cache in data/interim/
+spendpipe/eda.py             shared matplotlib chart style for notebooks (old system blue, new system orange)
+notebooks/01-05              stage 2 evidence, committed with outputs; one question per notebook
+tests/test_sources.py        loader tests
 spendpipe/config.py          column map, category maps, keyword rules, constants
 spendpipe/clean.py           load_raw, clean_events, collapse_to_contracts, data_quality_issues
 spendpipe/categorize.py      UNSPSC / GSIN-keyword categorisation
@@ -139,8 +154,8 @@ spendpipe/suppliers.py       rule-based supplier resolution
 spendpipe/build_db.py        SQLite star schema + Power BI CSV export
 spendpipe/report.py          8-tab Excel monthly report (openpyxl, live formulas)
 sql/schema.sql, sql/views.sql
-tests/test_core.py           53 tests (python -m pytest -q)
-docs/                        data_dictionary.md, decisions.md, powerbi_spec.md, sample report
+tests/test_core.py           v1 tests (60 in total with test_sources; python -m pytest -q)
+docs/                        data_dictionary.md, decisions.md, project_log.md, stage2_summary.md, powerbi_spec.md
 ```
 
 ```bash
